@@ -7,7 +7,7 @@ Every day from December 1 to 24 a new door opens on a cybersecurity story: a maj
 breach, an actively exploited vulnerability, or a lesson from security history. Outside December,
 the intelligence feed and the archive of past editions stay open year-round.
 
-Live at [cyberxmas.com](https://cyberxmas.com). Source at [github.com/OptoCloud/CyberXmas](https://github.com/OptoCloud/CyberXmas).
+Live at [cyberxmas.com](https://cyberxmas.com).
 
 ## Features
 
