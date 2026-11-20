@@ -112,10 +112,16 @@ resource ID and a change in behaviour. The adoption rules:
 - **Cache (in use).** `server/http/cache.ts` keeps the public GET endpoints (edition, feed,
   report) in the Cache API for `PUBLIC_CACHE_SECONDS` (60) and in browsers for 30 seconds, never
   past the edition's next midnight, so a newly opened door is never hidden behind a cached
-  response. Editorial writes do not purge it: a published or withdrawn report shows up within a
-  minute. Only 200 responses are stored; tips, sign-in and the desk stay `no-store`. The Cache
-  API works on the custom domain only, so on workers.dev every request reaches D1. D1 stays the
-  source of truth.
+  response. Each handler builds its cache key from the parameters it reads, so unknown query
+  strings share one entry instead of forcing a D1 read. The tip board is cached the same way for
+  signed-out visitors only, and never in browsers. An editorial write clears this year's edition,
+  the first feed page, the first tip page and the report itself in the data centre the editor
+  reached; elsewhere a published, withdrawn or dismissed item changes within a minute. Only 200
+  responses are stored; sign-in and the desk stay `no-store`. The Cache API works on the custom
+  domain only, so on workers.dev every request reaches D1. D1 stays the source of truth.
+- **Rate limiting at the edge.** The Worker limits tip submissions and likes itself. Reads are
+  not limited in code: add a WAF rate limiting rule for `/api/*` on the zone (for example 120
+  requests per minute per IP) so one client cannot run up D1 reads with unique searches.
 - **Queues (phase 2).** Add them when collectors exceed what one cron invocation can do (more
   sources, NVD paging). `jobs/collect.ts` already isolates each source, so each becomes one
   message.
@@ -195,8 +201,12 @@ Configuration has four kinds, kept apart on purpose:
    editor's email, and the shared key is gone.
 
 The Worker verifies the `Cf-Access-Jwt-Assertion` signature, issuer, audience and expiry itself,
-so requests that bypass Access (for example a `workers.dev` URL) are still rejected. Disable
-`workers_dev` in production as well.
+so requests that bypass Access (for example a `workers.dev` URL) are still rejected.
+`wrangler.jsonc` also turns `workers_dev` and `preview_urls` off for production.
+
+Until then the desk relies on one shared `EDITOR_TOKEN`. The audit trail records the editor on
+every desk action (`editorial_events.actor`), but with the shared key that is always
+"shared editor key"; Access is what makes it a name.
 
 ## Environments
 
@@ -216,7 +226,14 @@ December without touching production. Only the edition clock moves: collection, 
 audit timestamps use real time. With `EDITION_TIME_TRAVEL=true` the banner has a time machine: it
 sets the `cyberxmas-date` cookie, and the server then runs that visitor's edition clock on the chosen
 date, so doors, embargo, countdowns and the desk's scheduling rules all behave as on that day.
-Public responses are not cached while time travel is on. `scripts/deploy-preview.ts` builds with `CLOUDFLARE_ENV=preview`
+Public responses are not cached while time travel is on.
+
+**The preview is public.** It runs on a guessable workers.dev name, and the time machine lets any
+visitor set the date and read every scheduled door. Treat everything drafted there as published,
+or put a Cloudflare Access application in front of the preview hostname before drafting real
+December stories on it.
+
+`scripts/deploy-preview.ts` builds with `CLOUDFLARE_ENV=preview`
 (the adapter then writes the preview's bindings into its generated config), applies the preview's
 migrations and deploys. After it runs, the build output belongs to the preview, so always deploy
 production with `pnpm deploy`, which rebuilds.
@@ -240,17 +257,14 @@ production with `pnpm deploy`, which rebuilds.
 
 Current tables: `incidents`, `calendar_entries`, `editorial_events` (filled by triggers),
 `editorial_candidates`, `editorial_source_state`, `community_tips`, `community_tip_likes`,
-`community_sessions`, `editorial_ai_digests`.
+`community_sessions`, `community_blocks`, `editorial_ai_digests`.
 
 Next migrations, in order:
 
-1. `editorial_events.actor`. The triggers cannot see who acted, so write audit rows from
-   `api/editorial.ts` with the editor's name (available now that Access identifies editors), and
-   keep the triggers as a backstop.
-2. `evidence` (incident_id, url, kind, verification) and `sources`: one canonical incident with
+1. `evidence` (incident_id, url, kind, verification) and `sources`: one canonical incident with
    many evidence records, as ROADMAP.md describes, plus a `verification` column on `incidents`.
-3. Expiry of `community_sessions` and old digests, by a cleanup step in the hourly job.
-4. Votes by type, the reputation ledger and roles (phases 3 and 4).
+2. Expiry of `community_sessions` and old digests, by a cleanup step in the hourly job.
+3. Votes by type, the reputation ledger and roles (phases 3 and 4).
 
 ## Security model
 
@@ -276,8 +290,16 @@ Next migrations, in order:
 - **Transport.** Every response sends HSTS for a year (pages from `hooks.server.ts`,
   static files from `_headers`). The HTTP to HTTPS redirect is the zone's Always Use HTTPS
   setting, which must stay on.
-- **Abuse.** Rate limits, Turnstile bound to hostname and action, canonical-source
-  deduplication, and no IP addresses stored in D1.
+- **Abuse.** Rate limits per account and IP, a cap of 10 tips per account per 24 hours,
+  Turnstile bound to hostname and action, canonical-source deduplication, and no IP addresses
+  stored in D1. Tips are public as soon as they are sent, so the desk shows who sent each one
+  and can block the account: that dismisses its pending tips, ends its sessions, removes its
+  likes and refuses its next sign-in. A dismissed tip frees its source for another submission;
+  a source that became a report stays taken.
+- **Audit.** Database triggers log every change to reports, doors, candidates and tips, and the
+  desk API adds a `desk_*` row with the editor's name for each action.
+- **Content Security Policy.** Scripts need a per-request nonce or one of two fixed Cloudflare
+  origins. Stylesheets must come from the site itself; only `style` attributes may be inline.
 
 ## Observability
 
@@ -308,5 +330,4 @@ Next migrations, in order:
    handlers and stream the slower sections, so pages render on the server. Move the tip form and
    editorial actions to remote functions (`form` / `command` in `*.remote.ts`). Keep the JSON
    endpoints as the public API.
-2. The `editorial_events.actor` migration.
-3. Phase 2 resources (Queues, Workflows, Email) as their features are built.
+2. Phase 2 resources (Queues, Workflows, Email) as their features are built.

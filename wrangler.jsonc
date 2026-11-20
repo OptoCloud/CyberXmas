@@ -3,6 +3,9 @@
   "name": "cyberxmas",
   "compatibility_date": "2026-11-16",
   "compatibility_flags": ["nodejs_compat"],
+  // Production is reachable only through its custom domain, never a workers.dev or preview URL.
+  "workers_dev": false,
+  "preview_urls": false,
 
   // Cron expressions must match CRON_COLLECT and CRON_AI_REVIEW below (checked by `pnpm test`).
   "triggers": { "crons": ["0 * * * *", "15 6 * * *"] },
@@ -56,10 +59,13 @@
     // The preview site (Worker cyberxmas-preview, deployed with `pnpm run deploy:preview`).
     // It collects real sources into its own database and runs the edition clock ahead, so the
     // desk can draft and publish doors before December. Nothing here touches production.
-    // Bindings and vars are not inherited, so each one is repeated. GitHub sign-in uses its own
-    // OAuth app (GITHUB_CLIENT_ID below, GITHUB_CLIENT_SECRET as a secret); the desk uses the
-    // preview's own EDITOR_TOKEN secret.
+    // Bindings and vars are not inherited, so each one is repeated. GitHub sign-in is off here
+    // (no GITHUB_CLIENT_ID); the desk uses the preview's own EDITOR_TOKEN secret.
+    // The preview is public on workers.dev and its time machine lets any visitor open scheduled
+    // doors, so put a Cloudflare Access application in front of it before drafting real stories.
     "preview": {
+      "workers_dev": true,
+      "preview_urls": false,
       "triggers": { "crons": ["0 * * * *", "15 6 * * *"] },
       "vars": {
         "EDITION_TIMEZONE": "UTC",

@@ -21,8 +21,10 @@ export default defineConfig({
         'default-src': ['self'],
         // Cloudflare Web Analytics injects its beacon when it is enabled for the zone.
         'script-src': ['self', `${turnstile}/turnstile/`, 'https://static.cloudflareinsights.com'],
-        // Components set CSS custom properties through style attributes, which need unsafe-inline.
-        'style-src': ['self', 'unsafe-inline'],
+        // Components set CSS custom properties through style attributes, so only attributes may be
+        // inline. Stylesheets and <style> elements must come from this origin.
+        'style-src': ['self'],
+        'style-src-attr': ['unsafe-inline'],
         'img-src': ['self', 'data:'],
         'font-src': ['self'],
         'connect-src': ['self', 'https://cloudflareinsights.com'],
