@@ -8,7 +8,7 @@ import { runCollection } from './collect.ts';
 export async function scheduled(controller: ScheduledController, env: Env, options: ContextOptions = {}): Promise<void> {
   const ctx = createContext(env, { now: new Date(controller.scheduledTime), ...options });
   const { schedule } = ctx.config;
-  if (controller.cron === schedule.aiReview) return runAiReview(ctx);
+  if (controller.cron === schedule.aiReview) { await runAiReview(ctx); return; }
   if (controller.cron === schedule.collect) {
     const failed = (await runCollection(ctx)).filter((result) => 'error' in result).map((result) => result.provider);
     if (failed.length) throw new Error(`Source collection failed: ${failed.join(', ')}`);

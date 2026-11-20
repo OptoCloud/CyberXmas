@@ -157,8 +157,15 @@ test('editor authentication, explicit scheduling, UTC reveal and withdrawal', as
   assert.equal((await incident(id, '2026-12-02T00:00:00Z')).status, 404);
   const queue = await json(admin());
   assert.equal(queue.editor, 'shared editor key');
+  // Triggers log each change; the desk API adds a row naming the editor who made it.
   assert.deepEqual(queue.audit.map((event: { action: string }) => event.action), [
-    'publication_removed', 'report_created', 'publication_set', 'door_assigned', 'report_created'
+    'desk_withdraw', 'publication_removed', 'desk_save', 'report_created', 'desk_publish', 'publication_set', 'door_assigned',
+    'desk_save', 'report_created'
+  ]);
+  assert.deepEqual(queue.audit.filter((event: { actor: string | null }) => event.actor)
+    .map((event: { actor: string; incident_id: number; detail: string | null }) => [event.actor, event.incident_id, event.detail]), [
+    ['shared editor key', id, null], ['shared editor key', other.id, null], ['shared editor key', id, 'door 2026-12-02'],
+    ['shared editor key', id, null]
   ]);
 });
 
@@ -287,6 +294,19 @@ test('daily AI reviews public tips and imported leads once and keeps its recomme
   assert.equal((await editorial()).status, 'failed');
   assert.equal(sqlite.prepare("SELECT ai_reviewed_at FROM community_tips WHERE title = 'Next tip'").get()!.ai_reviewed_at, null);
   await assert.rejects(scheduled({ ...controller, cron: '*/5 * * * *' }, env), /No job is configured/);
+
+  // A run that is still marked running blocks a rerun until it is old enough to be considered dead.
+  const quiet = { run: async () => ({ response: { recommendations: [] } }) };
+  const rerun = () => call(postAction, '/api/editorial', {
+    method: 'POST', headers: { Authorization: `Bearer ${editorToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'run_job', job: 'ai_review' }), env: { ...env, AI: quiet }
+  });
+  const stall = sqlite.prepare("UPDATE editorial_ai_digests SET status = 'running', started_at = ? WHERE day = '2026-12-01'");
+  stall.run(new Date(now.getTime() - 60000).toISOString());
+  assert.equal((await rerun()).status, 409);
+  stall.run(new Date(now.getTime() - 3600000).toISOString());
+  assert.equal((await rerun()).status, 200);
+  assert.equal(sqlite.prepare("SELECT status FROM editorial_ai_digests WHERE day = '2026-12-01'").get()!.status, 'ready');
 });
 
 test('verified tips enter ranked public review while only moderators can publish or schedule', async (t) => {
@@ -374,4 +394,35 @@ test('verified tips enter ranked public review while only moderators can publish
   assert.equal((await admin({ action: 'publish', id: reportId, door: { year: 2026, day: 2 } })).status, 200);
   assert.equal((await incident(reportId)).status, 404);
   assert.equal((await incident(reportId, '2026-12-02T00:00:00Z')).status, 200);
+
+  // A dismissed tip does not hold its source: another account can send it again, without the old likes.
+  sqlite.prepare('INSERT INTO community_tip_likes VALUES (?, 3)').run(cveId);
+  const again = await submit({ data: cve, auth: reviewer });
+  assert.equal(again.status, 201);
+  assert.equal((await again.json()).id, cveId);
+  assert.deepEqual((await list()).map((tip: { id: number; likes: number }) => [tip.id, tip.likes]), [[cveId, 0]]);
+  // A source that became a report stays taken.
+  assert.equal((await submit({ auth: reviewer })).status, 409);
+
+  // The desk sees who sent a tip and can block that account.
+  const pending = (await json(admin())).tips[0];
+  assert.deepEqual([pending.submitter_github_id, pending.submitter_login], [2, 'reviewer-2']);
+  assert.equal((await admin({ action: 'block_submitter', tipId: cveId })).status, 200);
+  assert.deepEqual(await list(), []);
+  assert.equal((await json(call(listTips, '/api/tips', { headers: { Cookie: reviewer }, env }))).viewer, null);
+  assert.equal((await submit({ data: cve, auth: reviewer })).status, 401);
+  assert.equal((await signIn(call, env, { id: 2, login: 'reviewer-2' })).headers.get('Location'), '/submit?signin=failed');
+  assert.deepEqual((await json(admin())).blocks.map((row: { github_id: number; login: string }) => [row.github_id, row.login]), [[2, 'reviewer-2']]);
+  assert.equal((await admin({ action: 'unblock', githubId: 2 })).status, 200);
+  assert.equal((await admin({ action: 'unblock', githubId: 2 })).status, 409);
+  assert.equal((await signIn(call, env, { id: 2, login: 'reviewer-2' })).headers.get('Location'), '/submit');
+
+  // One account can send only so many tips in 24 hours.
+  const filler = sqlite.prepare(`INSERT INTO community_tips (category, title, summary, source_url, submitter_github_id, submitted_at)
+    VALUES ('outage', 'Filler', 'Filler', ?, 1, '2026-12-01T12:00:00.000Z')`);
+  for (let n = 0; n < 10; n++) filler.run(`https://www.githubstatus.com/incidents/filler${n}`);
+  const fresh = { ...body, sourceUrl: 'https://www.githubstatus.com/incidents/fresh1' };
+  assert.equal((await submit({ data: fresh })).status, 429);
+  sqlite.exec("UPDATE community_tips SET submitted_at = '2026-11-29T12:00:00.000Z' WHERE title = 'Filler'");
+  assert.equal((await submit({ data: fresh })).status, 201);
 });

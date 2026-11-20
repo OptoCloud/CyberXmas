@@ -2,16 +2,16 @@
 // Every write is conditional in SQL, so racing editors get a 409 instead of a lost update.
 import { doorDate, doorOpensAt, isDoorDay } from '#lib/domain/edition.ts';
 import type {
-  AuditEvent, CandidateRow, EditorialQueue, PendingTipRow, ReportRow, SourceStateRow
+  AuditEvent, BlockRow, CandidateRow, EditorialQueue, PendingTipRow, ReportRow, SourceStateRow
 } from '#lib/domain/editorial.ts';
 import { parseReport } from '#lib/domain/reports.ts';
 import { isPositiveId, isRecord } from '#lib/util/validate.ts';
 import { authenticateEditor } from '../auth/editor.ts';
 import { pendingCandidates, reviewCandidate, sourceStates } from '../db/candidates.ts';
-import { dismissTip, pendingTips } from '../db/community.ts';
+import { blockedAccounts, blockSubmitter, dismissTip, pendingTips, unblockAccount } from '../db/community.ts';
 import { latestDigest, parseDigest } from '../db/digests.ts';
 import {
-  auditTrail, createReport, createReportFromCandidate, createReportFromTip, publishReport,
+  auditTrail, createReport, createReportFromCandidate, createReportFromTip, publishReport, recordDeskAction,
   reportQueue, scheduleReport, updateReport, withdrawReport
 } from '../db/incidents.ts';
 import type { ApiHandler, Context } from '../context.ts';
@@ -26,36 +26,57 @@ export const getQueue: ApiHandler = async ({ request, locals: { ctx } }) => {
   if (response) return response;
   const { db, config } = ctx;
   const limits = config.editorial.queue;
-  const [reports, candidates, sources, audit, tips, digests] = await db.batch([
+  const [reports, candidates, sources, audit, tips, digests, blocks] = await db.batch([
     reportQueue(db, limits.reports),
     pendingCandidates(db, limits.candidates),
     sourceStates(db),
     auditTrail(db, limits.audit),
     pendingTips(db, limits.tips),
-    latestDigest(db)
+    latestDigest(db),
+    blockedAccounts(db, limits.blocks)
   ]);
   const rows = <T>(result: { results: unknown[] } | undefined) => (result?.results ?? []) as T[];
   return json({
     editor: editor.name,
     timezone: config.edition.timezone,
     reports: rows<ReportRow>(reports), candidates: rows<CandidateRow>(candidates), sources: rows<SourceStateRow>(sources),
-    audit: rows<AuditEvent>(audit), tips: rows<PendingTipRow>(tips),
+    audit: rows<AuditEvent>(audit), tips: rows<PendingTipRow>(tips), blocks: rows<BlockRow>(blocks),
     aiReview: { enabled: config.aiReview.enabled, digest: parseDigest(digests!.results[0]) }
   } satisfies EditorialQueue);
 };
 
+/** Actions that change what the public API returns, so cached responses are cleared after them. */
+const publicActions = ['save', 'publish', 'withdraw', 'dismiss_tip', 'block_submitter'];
+
 export const postAction: ApiHandler = async ({ request, locals: { ctx } }) => {
-  const { response } = await authenticateEditor(request, ctx);
+  const { editor, response } = await authenticateEditor(request, ctx);
   if (response) return response;
   if (!isSameOriginOrUnset(request)) return error(403, 'Origin not permitted');
   const data = await readJsonBody(request, ctx.config.http.maxBodyBytes);
   if (!isRecord(data)) return error(400, 'Expected a JSON request');
   const result = await runAction(data, ctx);
-  if (result.ok && ['save', 'publish', 'withdraw'].includes(data.action as string)) {
-    await purgePublic(request, ctx, isPositiveId(data.id) ? data.id : undefined);
+  if (result.ok) {
+    const saved: unknown = data.action === 'save' ? await result.clone().json() : null;
+    const id = isPositiveId(data.id) ? data.id : isRecord(saved) && isPositiveId(saved.id) ? saved.id : null;
+    await recordDeskAction(ctx.db, editor.name, `desk_${String(data.action)}`, id, deskDetail(data));
+    if (publicActions.includes(data.action as string)) await purgePublic(request, ctx, id ?? undefined);
   }
   return result;
 };
+
+/** A short description of what an action was aimed at, for the audit trail. */
+function deskDetail(data: Record<string, unknown>): string | null {
+  const target = isRecord(data.candidate) ? data.candidate : data;
+  const door = isRecord(data.door) && Number.isInteger(data.door.year) && isDoorDay(data.door.day)
+    ? `door ${doorDate(data.door.year as number, data.door.day)}` : null;
+  const parts = [
+    data.job, data.status, door,
+    isPositiveId(data.tipId) ? `tip ${data.tipId}` : null,
+    isPositiveId(data.githubId) ? `account ${data.githubId}` : null,
+    typeof target.provider === 'string' && typeof target.externalId === 'string' ? `${target.provider}:${target.externalId}` : null
+  ].filter((part): part is string => typeof part === 'string' && part !== '');
+  return parts.join(' ').slice(0, 200) || null;
+}
 
 async function runAction(data: Record<string, unknown>, ctx: Context): Promise<Response> {
   const { db, config, clock } = ctx;
@@ -64,15 +85,24 @@ async function runAction(data: Record<string, unknown>, ctx: Context): Promise<R
     if (data.job === 'collect') return json({ ok: true, results: await runCollection(ctx) });
     if (data.job === 'ai_review') {
       if (!ctx.features.aiReview) return error(409, 'AI review is not enabled');
-      try { await runAiReview(ctx, { rerun: true }); }
+      let ran: boolean;
+      try { ran = await runAiReview(ctx, { rerun: true }); }
       catch { return error(502, 'AI review failed. Try again later.'); }
-      return json({ ok: true });
+      return ran ? json({ ok: true }) : error(409, 'An AI review is already running. Try again in a few minutes.');
     }
     return error(400, 'Unknown job');
   }
 
   if (data.action === 'dismiss_tip' && isPositiveId(data.tipId)) {
     return await dismissTip(db, data.tipId) ? json({ ok: true }) : error(409, 'Tip is no longer pending');
+  }
+
+  if (data.action === 'block_submitter' && isPositiveId(data.tipId)) {
+    return await blockSubmitter(db, data.tipId) ? json({ ok: true }) : error(409, 'That tip has no known submitter');
+  }
+
+  if (data.action === 'unblock' && isPositiveId(data.githubId)) {
+    return await unblockAccount(db, data.githubId) ? json({ ok: true }) : error(409, 'That account is not blocked');
   }
 
   if (data.action === 'review') {

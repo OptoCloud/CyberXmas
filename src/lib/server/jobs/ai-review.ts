@@ -46,13 +46,16 @@ export function shortlist(result: unknown, rows: Lead[], maxItems: number): Shor
   return selected;
 }
 
-/** `rerun` (the desk's "Run now") replaces today's finished digest instead of skipping. */
-export async function runAiReview(ctx: Context, { rerun = false } = {}): Promise<void> {
-  if (!ctx.features.aiReview) return;
+/**
+ * `rerun` (the desk's "Run now") replaces today's finished digest instead of skipping.
+ * Returns false when nothing ran: the review is off, or today's run is already claimed.
+ */
+export async function runAiReview(ctx: Context, { rerun = false } = {}): Promise<boolean> {
+  if (!ctx.features.aiReview) return false;
   const { db, config, now, clock, metrics } = ctx;
   const settings = config.aiReview;
   const day = clock.timestamp.slice(0, 10);
-  if (rerun) await releaseDigest(db, day);
+  if (rerun) await releaseDigest(db, day, new Date(now.getTime() - settings.staleRunSeconds * 1000).toISOString());
   const since = new Date(now.getTime() - settings.lookbackDays * 86400000).toISOString();
   const [tips, candidates] = await db.batch([
     tipsForReview(db, settings.maxTips),
@@ -60,7 +63,7 @@ export async function runAiReview(ctx: Context, { rerun = false } = {}): Promise
   ]);
   const tipRows = tips!.results as unknown as TipForReview[];
   const rows = [...tipRows, ...(candidates!.results as unknown as CandidateForReview[])] as Lead[];
-  if (!(await claimDigest(db, day, tipRows.length, rows.length - tipRows.length))) return;
+  if (!(await claimDigest(db, day, tipRows.length, rows.length - tipRows.length, now.toISOString()))) return false;
 
   try {
     let selected: ShortlistEntry[] = [];
@@ -78,6 +81,7 @@ export async function runAiReview(ctx: Context, { rerun = false } = {}): Promise
     }
     await completeDigest(db, day, selected, tipRows.map(({ tipId }) => markTipReviewed(db, tipId, clock.timestamp)));
     metrics.write('ai_review', { status: 'ok', values: [rows.length, selected.length] });
+    return true;
   } catch {
     await failDigest(db, day);
     metrics.write('ai_review', { status: 'error', values: [rows.length] });

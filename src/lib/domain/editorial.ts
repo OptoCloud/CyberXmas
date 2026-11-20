@@ -45,6 +45,8 @@ export interface AuditEvent {
   action: string;
   incident_id: number | null;
   detail: string | null;
+  /** The editor, on rows written by the desk API; null on rows written by triggers. */
+  actor: string | null;
   created_at: string;
 }
 
@@ -55,6 +57,15 @@ export interface PendingTipRow {
   category: Category;
   source_url: string;
   likes: number;
+  /** Null on tips from before sign-in was required. */
+  submitter_github_id: number | null;
+  submitter_login: string | null;
+}
+
+export interface BlockRow {
+  github_id: number;
+  login: string | null;
+  blocked_at: string;
 }
 
 export interface ShortlistEntry {
@@ -83,6 +94,7 @@ export interface EditorialQueue {
   sources: SourceStateRow[];
   audit: AuditEvent[];
   tips: PendingTipRow[];
+  blocks: BlockRow[];
   aiReview: { enabled: boolean; digest: Digest | null };
 }
 

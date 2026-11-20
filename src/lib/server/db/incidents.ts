@@ -55,6 +55,12 @@ export const reportQueue = (db: D1Database, limit: number): D1PreparedStatement 
 export const auditTrail = (db: D1Database, limit: number): D1PreparedStatement =>
   db.prepare('SELECT * FROM editorial_events ORDER BY id DESC LIMIT ?').bind(limit);
 
+/** Record who did what at the desk. The triggers log the resulting changes but cannot see the editor. */
+export async function recordDeskAction(db: D1Database, actor: string, action: string, incidentId: number | null, detail: string | null): Promise<void> {
+  await db.prepare('INSERT INTO editorial_events (action, incident_id, detail, actor) VALUES (?, ?, ?, ?)')
+    .bind(action, incidentId, detail, actor).run();
+}
+
 // Editorial writes. Each returns null/false when the precondition no longer holds.
 
 const reportValues = (report: ReportInput) => [report.category, report.title, report.summary, report.takeaway,

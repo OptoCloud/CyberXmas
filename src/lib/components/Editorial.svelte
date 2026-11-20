@@ -167,14 +167,25 @@
       <h2>Community tips</h2>
       {#each queue.tips as row (row.id)}
         <div class="story editorial-row">
-          <div><strong>{row.title}</strong><p>{categories[row.category]} &middot; {row.likes} {row.likes === 1 ? 'like' : 'likes'} &middot; {row.summary}</p></div>
+          <div><strong>{row.title}</strong><p>{categories[row.category]} &middot; {row.likes} {row.likes === 1 ? 'like' : 'likes'} &middot; from {row.submitter_login ?? (row.submitter_github_id ? `account ${row.submitter_github_id}` : 'unknown')} &middot; {row.summary}</p></div>
           <div class="actions">
             <a href={row.source_url} rel="noreferrer">Source</a>
             <button disabled={busy} onclick={() => useTip(row)}>Start draft</button>
             <button disabled={busy} onclick={() => run(async () => { await request({ action: 'dismiss_tip', tipId: row.id }); await refresh(); }, 'Tip dismissed.')}>Dismiss</button>
+            {#if row.submitter_github_id}
+              <button disabled={busy} onclick={() => run(async () => { await request({ action: 'block_submitter', tipId: row.id }); await refresh(); }, 'Account blocked and its pending tips dismissed.')}>Block sender</button>
+            {/if}
           </div>
         </div>
       {:else}<p class="notice">No pending tips.</p>{/each}
+      {#if queue.blocks.length}
+        <h3>Blocked accounts</h3>
+        <ul>
+          {#each queue.blocks as row (row.github_id)}
+            <li>{row.login ?? `account ${row.github_id}`} &middot; blocked {row.blocked_at.slice(0, 10)} <button disabled={busy} onclick={() => run(async () => { await request({ action: 'unblock', githubId: row.github_id }); await refresh(); }, 'Account unblocked.')}>Unblock</button></li>
+          {/each}
+        </ul>
+      {/if}
     </section>
     <section class="section">
       <h2>Candidate queue</h2>
@@ -232,7 +243,7 @@
       {/if}
     </section>
     <section class="section"><h2>Recent activity</h2>
-      <ul>{#each queue.audit as event (event.id)}<li>{event.created_at} &middot; {event.action.replaceAll('_', ' ')} {event.incident_id ? `#${event.incident_id}` : ''} {event.detail ?? ''}</li>{/each}</ul>
+      <ul>{#each queue.audit as event (event.id)}<li>{event.created_at} &middot; {event.action.replaceAll('_', ' ')} {event.incident_id ? `#${event.incident_id}` : ''} {event.detail ?? ''}{event.actor ? ` · by ${event.actor}` : ''}</li>{/each}</ul>
     </section>
   {/if}
 </main>

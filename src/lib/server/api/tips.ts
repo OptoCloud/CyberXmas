@@ -4,28 +4,35 @@ import type { TipBoard } from '#lib/domain/community.ts';
 import { feedFilters, isCategory } from '#lib/domain/incidents.ts';
 import { tipSource } from '#lib/domain/tip-sources.ts';
 import { isBoundedText, isRecord } from '#lib/util/validate.ts';
-import { currentViewer } from '../auth/community-session.ts';
+import { currentViewer, sessionCookie } from '../auth/community-session.ts';
 import { withinLimits } from '../clients/cloudflare/rate-limit.ts';
 import { turnstilePassed, verifyTurnstile } from '../clients/cloudflare/turnstile.ts';
 import { getCveRecordState } from '../clients/cve.ts';
-import { findPublicTipAuthor, insertTip, listPublicTips, setTipLike } from '../db/community.ts';
+import { countTipsSince, findPublicTipAuthor, insertTip, listPublicTips, setTipLike } from '../db/community.ts';
+import { cachedPublic } from '../http/cache.ts';
+import { readCookie } from '../http/cookies.ts';
 import { isSameOrigin, readJsonBody } from '../http/request.ts';
 import { error, json, tooManyAttempts } from '../http/respond.ts';
 import type { ApiHandler } from '../context.ts';
 
 export const listTips: ApiHandler = async ({ request, locals: { ctx } }) => {
   const { features, env, config } = ctx;
-  const viewer = await currentViewer(request, ctx);
   const { page } = feedFilters(new URL(request.url).searchParams, config.feed);
   const { pageSize } = config.feed;
-  const rows = await listPublicTips(ctx.db, viewer?.id ?? null, pageSize + 1, (page - 1) * pageSize);
-  return json({
-    items: rows.slice(0, pageSize), page, hasMore: rows.length > pageSize,
-    viewer: viewer?.login ?? null,
-    signIn: features.signIn,
-    siteKey: features.tipSubmission ? env.TURNSTILE_SITE_KEY! : null,
-    canReview: features.tipReview
-  } satisfies TipBoard);
+  const render = async () => {
+    const viewer = await currentViewer(request, ctx);
+    const rows = await listPublicTips(ctx.db, viewer?.id ?? null, pageSize + 1, (page - 1) * pageSize);
+    return json({
+      items: rows.slice(0, pageSize), page, hasMore: rows.length > pageSize,
+      viewer: viewer?.login ?? null,
+      signIn: features.signIn,
+      siteKey: features.tipSubmission ? env.TURNSTILE_SITE_KEY! : null,
+      canReview: features.tipReview
+    } satisfies TipBoard);
+  };
+  // Signed-out visitors all see the same board, so it is served from the edge cache. It stays out
+  // of browser caches, because the same URL answers differently right after sign-in.
+  return readCookie(request, sessionCookie) ? render() : cachedPublic(request, ctx, `/api/tips?page=${page}`, render, { browser: false });
 };
 
 export const submitTip: ApiHandler = async ({ request, locals: { ctx } }) => {
@@ -38,6 +45,10 @@ export const submitTip: ApiHandler = async ({ request, locals: { ctx } }) => {
   const address = request.headers.get('CF-Connecting-IP');
   if (!address) return error(403, 'Unable to verify this connection');
   if (!(await withinLimits(env.TIP_LIMIT!, `account:${viewer.id}`, `address:${address}`))) return tooManyAttempts();
+  const dayAgo = new Date(ctx.now.getTime() - 86400000).toISOString();
+  if (await countTipsSince(ctx.db, viewer.id, dayAgo) >= config.community.tipsPerDay) {
+    return error(429, 'You have reached the daily tip limit. Try again tomorrow.', { 'Retry-After': '3600' });
+  }
 
   const body = await readJsonBody(request, config.http.maxBodyBytes);
   const { title, summary, category, sourceUrl = '', cve = '', token } = isRecord(body) ? body : {};
@@ -60,7 +71,8 @@ export const submitTip: ApiHandler = async ({ request, locals: { ctx } }) => {
     if (state === 'missing') return error(422, 'That CVE is not a published CVE Program record');
   }
   const added = await insertTip(ctx.db, {
-    category, title: title.trim(), summary: summary.trim(), sourceUrl: source.url, submitter: viewer.id
+    category, title: title.trim(), summary: summary.trim(), sourceUrl: source.url, submitter: viewer,
+    submittedAt: ctx.now.toISOString()
   });
   return added ? json(added, 201) : error(409, 'A tip with that source was already submitted');
 };

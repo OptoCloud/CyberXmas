@@ -39,12 +39,14 @@ export interface Config {
     turnstileAction: string;
     tipTitleMax: number;
     tipSummaryMax: number;
+    /** Tips one account may send in any 24 hours. */
+    tipsPerDay: number;
   };
   editorial: {
     auth: EditorialAuthMode;
     minTokenLength: number;
     reportMax: { title: number; summary: number; takeaway: number; sourceUrl: number };
-    queue: { reports: number; candidates: number; audit: number; tips: number };
+    queue: { reports: number; candidates: number; audit: number; tips: number; blocks: number };
   };
   access: {
     /** e.g. `example.cloudflareaccess.com`. Empty disables Access verification. */
@@ -69,6 +71,8 @@ export interface Config {
     lookbackDays: number;
     maxRecommendations: number;
     maxTokens: number;
+    /** A run still marked running after this long is treated as dead and may be replaced. */
+    staleRunSeconds: number;
   };
   /** Cron expressions; each must also appear in wrangler.jsonc `triggers.crons`. */
   schedule: { collect: string; aiReview: string };
@@ -85,13 +89,14 @@ export const defaults: Config = {
     oauthFlowSeconds: 600,
     turnstileAction: 'incident_tip',
     tipTitleMax: 250,
-    tipSummaryMax: 1500
+    tipSummaryMax: 1500,
+    tipsPerDay: 10
   },
   editorial: {
     auth: 'token',
     minTokenLength: 32,
     reportMax: { title: 250, summary: 3000, takeaway: 1500, sourceUrl: 2048 },
-    queue: { reports: 100, candidates: 50, audit: 30, tips: 50 }
+    queue: { reports: 100, candidates: 50, audit: 40, tips: 50, blocks: 50 }
   },
   access: { teamDomain: '', audience: '', certsTtlSeconds: 3600, clockSkewSeconds: 60 },
   collection: {
@@ -107,7 +112,8 @@ export const defaults: Config = {
     maxCandidates: 60,
     lookbackDays: 3,
     maxRecommendations: 5,
-    maxTokens: 1200
+    maxTokens: 1200,
+    staleRunSeconds: 600
   },
   schedule: { collect: '0 * * * *', aiReview: '15 6 * * *' }
 };

@@ -3,6 +3,7 @@ import { randomToken, randomTokenPattern, sha256Base64Url } from '#lib/util/cryp
 import { endSession, flowCookie, startSession } from '../auth/community-session.ts';
 import { exchangeGitHubCode, getGitHubIdentity, githubAuthorizeUrl, type GitHubOAuthApp } from '../clients/github.ts';
 import type { ApiHandler, Context } from '../context.ts';
+import { isBlocked } from '../db/community.ts';
 import { readCookie, secureCookie } from '../http/cookies.ts';
 import { isSameOrigin } from '../http/request.ts';
 import { error, json, redirect } from '../http/respond.ts';
@@ -38,7 +39,7 @@ export const callback: ApiHandler = async ({ request, locals: { ctx } }) => {
   } catch {
     return fail();
   }
-  if (!identity) return fail();
+  if (!identity || await isBlocked(ctx.db, identity.id)) return fail();
   return redirect('/submit', clearFlow, await startSession(ctx, identity));
 };
 
