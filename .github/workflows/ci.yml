@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    env:
+      CI: 'true'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - run: pnpm install --frozen-lockfile
+      # Duplicate copies of svelte or kit cause confusing type errors; keep the lockfile deduplicated.
+      - run: pnpm dedupe --check
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
+      - name: Smoke-test the packaged Worker with local D1
+        if: matrix.node == 26
+        shell: bash
+        run: |
+          state="$RUNNER_TEMP/cyberxmas-d1"
+          log="$RUNNER_TEMP/cyberxmas-worker.log"
+          pnpm exec wrangler d1 migrations apply DB --local --persist-to "$state"
+          # Throwaway editor key plus Cloudflare's always-pass Turnstile test keys, for the browser e2e.
+          {
+            echo "EDITOR_TOKEN=$(openssl rand -base64 32 | tr -d '=+/')"
+            echo "TURNSTILE_SITE_KEY=1x00000000000000000000AA"
+            echo "TURNSTILE_SECRET=1x0000000000000000000000000000000AA"
+          } > .dev.vars
+          pnpm exec wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$state" > "$log" 2>&1 &
+          worker=$!
+          trap 'kill "$worker" 2>/dev/null || true' EXIT
+          pnpm test:smoke || { cat "$log"; exit 1; }
+          pnpm test:e2e || { cat "$log"; exit 1; }
+      - name: Verify the deployment bundle without publishing
+        if: matrix.node == 26
+        run: pnpm exec wrangler deploy --dry-run

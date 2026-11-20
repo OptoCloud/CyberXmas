@@ -1,0 +1,11 @@
+# Security headers for static files (fonts, scripts, styles). The Cloudflare adapter reads this
+# file from the project root and appends its own cache rules for /_app/immutable/. Rendered pages
+# and API responses get the same set from src/hooks.server.ts; keep the two lists in sync.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

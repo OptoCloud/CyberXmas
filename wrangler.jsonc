@@ -1,0 +1,93 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cyberxmas",
+  "compatibility_date": "2026-11-16",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Cron expressions must match CRON_COLLECT and CRON_AI_REVIEW below (checked by `pnpm test`).
+  "triggers": { "crons": ["0 * * * *", "15 6 * * *"] },
+
+  // Non-secret configuration. Every variable is documented in docs/INFRASTRUCTURE.md and
+  // validated by src/lib/config; invalid values fall back to their defaults with a warning.
+  // Secrets (EDITOR_TOKEN, GITHUB_CLIENT_SECRET, TURNSTILE_SECRET) go in `wrangler secret put`
+  // for production and the ignored .dev.vars file locally.
+  "vars": {
+    "EDITION_TIMEZONE": "UTC",
+    "EDITORIAL_AUTH": "token",
+    "COLLECTOR_SOURCES": "cloudflare,github,cisa",
+    "AI_REVIEW_ENABLED": "true",
+    "CRON_COLLECT": "0 * * * *",
+    "CRON_AI_REVIEW": "15 6 * * *",
+    // Public identifiers, safe to commit. Their secrets live in `wrangler secret put`.
+    "GITHUB_CLIENT_ID": "Ov23li356MjmUYTDAi4R",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAGKSyqtYI4vpg_od"
+    // For Cloudflare Access editorial sign-in, also set:
+    // "ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
+    // "ACCESS_AUD": ""
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cyberxmas",
+      "database_id": "dd450fb5-2730-4e07-89b9-e8f61b14a8eb"
+    }
+  ],
+  "ai": { "binding": "AI" },
+  "ratelimits": [
+    { "name": "TIP_LIMIT", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
+    { "name": "REVIEW_LIMIT", "namespace_id": "1002", "simple": { "limit": 45, "period": 60 } }
+  ],
+  // Job and error events. Datasets are created on first write.
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cyberxmas_events" }],
+  // Workers Logs and traces, kept for the dashboard. Inherited by the preview environment.
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": true },
+    "traces": { "enabled": true }
+  },
+  "upload_source_maps": true,
+
+  // Production serves on the apex domain. The zone must be in this Cloudflare account; the
+  // preview environment does not inherit routes and stays on workers.dev.
+  "routes": [{ "pattern": "cyberxmas.com", "custom_domain": true }],
+
+  "env": {
+    // The preview site (Worker cyberxmas-preview, deployed with `pnpm run deploy:preview`).
+    // It collects real sources into its own database and runs the edition clock ahead, so the
+    // desk can draft and publish doors before December. Nothing here touches production.
+    // Bindings and vars are not inherited, so each one is repeated. GitHub sign-in uses its own
+    // OAuth app (GITHUB_CLIENT_ID below, GITHUB_CLIENT_SECRET as a secret); the desk uses the
+    // preview's own EDITOR_TOKEN secret.
+    "preview": {
+      "triggers": { "crons": ["0 * * * *", "15 6 * * *"] },
+      "vars": {
+        "EDITION_TIMEZONE": "UTC",
+        "EDITION_DATE_SHIFT_DAYS": "11",
+        "EDITION_TIME_TRAVEL": "true",
+        "SEARCH_INDEXING": "false",
+        "EDITORIAL_AUTH": "token",
+        "COLLECTOR_SOURCES": "cloudflare,github,cisa",
+        "AI_REVIEW_ENABLED": "true",
+        "CRON_COLLECT": "0 * * * *",
+        "CRON_AI_REVIEW": "15 6 * * *",
+        // Cloudflare's always-pass Turnstile test key; the matching test secret is set as
+        // TURNSTILE_SECRET. The preview tests the tip flow, not bot protection.
+        "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "cyberxmas-preview",
+          "database_id": "cf097e6a-b9f8-42f9-b9d0-e75d419ee521"
+        }
+      ],
+      "ai": { "binding": "AI" },
+      "ratelimits": [
+        { "name": "TIP_LIMIT", "namespace_id": "1003", "simple": { "limit": 5, "period": 60 } },
+        { "name": "REVIEW_LIMIT", "namespace_id": "1004", "simple": { "limit": 45, "period": 60 } }
+      ],
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "cyberxmas_preview_events" }]
+    }
+  }
+}

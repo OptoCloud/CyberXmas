@@ -1,0 +1,7 @@
+/node_modules/
+/dist/
+/.wrangler/
+/.svelte-kit/
+/.dev.vars*
+/.env*
+/e2e-failure.png

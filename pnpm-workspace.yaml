@@ -1,0 +1,8 @@
+# Supply-chain guard: refuse dependencies from git or tarball URLs deep in the tree.
+blockExoticSubdeps: true
+engineStrict: true
+
+allowBuilds:
+  esbuild@0.28.2: true
+  workerd@1.20261118.1: true
+  workerd@1.20261116.1: true
