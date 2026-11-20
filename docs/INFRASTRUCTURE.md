@@ -30,6 +30,7 @@ esbuild (the cron bundle) and TypeScript.
 ```
 src/
 ├ routes/                    pages and API endpoints (file-based routing)
+│ ├ (public)/                public pages; +layout.server.ts loads their data on the server
 │ └ api/**/+server.ts        one file per endpoint; re-exports handlers from #lib/server/api
 ├ hooks.server.ts            builds the request Context into event.locals; handleError
 ├ params.ts                  route param matchers ([id=id] parses to a number)
@@ -76,9 +77,13 @@ classes would be exported the same way.
    `Context`: validated config (parsed once per isolate), feature flags derived from bindings and
    secrets, D1, the outbound HTTP client, metrics, and the **edition clock** (now, today and year
    in `EDITION_TIMEZONE`).
-3. The `+server.ts` export runs a handler from `#lib/server/api`, which authenticates if needed,
+3. For a public page, the `(public)` layout's server `load` calls `loadPublicPage`, which reads
+   the edition, feed, report or tip board through the same API handlers (and their edge cache),
+   so the HTML arrives with its content and nothing moves after load. `hooks.server.ts` also
+   preloads the Latin font files so text does not reflow when they arrive.
+4. An API request runs its `+server.ts` export: a handler from `#lib/server/api`, which authenticates if needed,
    validates input with `#lib/domain`, and calls `#lib/server/db` and `#lib/server/clients`.
-4. Unexpected errors reach `handleError`, which logs them (Workers Logs), counts a
+5. Unexpected errors reach `handleError`, which logs them (Workers Logs), counts a
    `request_error` event (Analytics Engine) and returns a generic message.
 
 Scheduled runs build the same `Context` from `controller.scheduledTime`. The cron expression
@@ -325,9 +330,8 @@ Next migrations, in order:
 
 ## Next steps
 
-1. **SvelteKit-native data loading.** Public pages currently render on the client and fetch the
-   JSON API. Move them to `+page.server.ts` `load` functions that share code with the API
-   handlers and stream the slower sections, so pages render on the server. Move the tip form and
-   editorial actions to remote functions (`form` / `command` in `*.remote.ts`). Keep the JSON
-   endpoints as the public API.
+1. **Remote functions.** Public pages now get their data in a server `load`
+   (`routes/(public)/+layout.server.ts`, which calls `server/api/pages.ts`), so they render
+   complete on the server. Move the tip form and editorial actions to remote functions
+   (`form` / `command` in `*.remote.ts`). Keep the JSON endpoints as the public API.
 2. Phase 2 resources (Queues, Workflows, Email) as their features are built.

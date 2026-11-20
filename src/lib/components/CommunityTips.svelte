@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import TipForm from './TipForm.svelte';
   import type { PublicTip, TipBoard } from '#lib/domain/community.ts';
   import { categories } from '#lib/domain/incidents.ts';
 
-  let board = $state<TipBoard | null>(null);
+  // The server sends the first board with the page; without it (demo, or a failed read) it is fetched here.
+  const { initial }: { initial: TipBoard | null } = $props();
+  let board = $state<TipBoard | null>(untrack(() => initial));
   let error = $state('');
   let status = $state('');
   let busy = $state(false);
@@ -37,7 +39,7 @@
 
   onMount(() => {
     run(async () => {
-      await refresh();
+      if (!board) await refresh();
       if (new URL(location.href).searchParams.get('signin') === 'failed') error = 'GitHub sign-in did not complete. Try again.';
     });
     return () => { revision++; };

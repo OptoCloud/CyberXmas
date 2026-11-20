@@ -26,7 +26,11 @@ export const handle: Handle = async ({ event, resolve }) => {
   let ctx: Context | undefined;
   const context = () => (ctx ??= createContext(env, { waitUntil, editionDate: readCookie(event.request, editionDateCookie) }));
   Object.defineProperty(event.locals, 'ctx', { get: context });
-  const response = await resolve(event);
+  // Preload the Latin fonts along with scripts and styles, so text does not reflow when they
+  // replace the fallback faces.
+  const response = await resolve(event, {
+    preload: ({ type, path }) => type === 'js' || type === 'css' || (type === 'font' && /-latin-(?!ext)[^/]*\.woff2$/.test(path))
+  });
   try {
     for (const [name, value] of Object.entries(securityHeaders)) {
       if (!response.headers.has(name)) response.headers.set(name, value);

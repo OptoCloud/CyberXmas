@@ -401,24 +401,77 @@ footer strong { color: var(--fg); font: 1.25rem var(--display); }
 @keyframes hold { 0%, 100% { transform: none; } 30% { transform: translateX(-.4rem) rotate(-2deg); } 65% { transform: translateX(.35rem) rotate(1.5deg); } }
 
 /*
- * The home and calendar pages are posters: on a tall desktop window the whole sheet scales with the
- * window height so it fits without scrolling. Sizes are in rem, so scaling the root font size acts
- * like browser zoom. --fit-rem is the page's height in rem; below 12px per rem (75%) the text gets
- * too small, so shorter windows keep the full size and scroll.
+ * ---------- Fit to the window: home and calendar on a desktop screen ----------
+ * These two pages are posters, so on a desktop window the whole sheet fits without scrolling. The
+ * page becomes a column as tall as the window: masthead and footer keep their size, the status
+ * tiles and desk log move beside the calendar, and the 24 doors share whatever height is left.
+ * Door contents size themselves from the door (container units). Smaller windows scroll as usual.
  */
-:root:has(main[data-view="home"]) { --fit-rem: 115; }
-:root:has(main[data-view="calendar"]) { --fit-rem: 120; }
-@media (min-width: 901px) and (min-height: 1380px) {
-  :root:has(main[data-view="home"]) { font-size: min(100%, calc(100dvh / var(--fit-rem))); }
+@media (min-width: 1100px) and (min-height: 680px) {
+  body:has(main.fit) { display: flex; flex-direction: column; height: 100dvh; }
+  body:has(main.fit) .wrap { width: min(80rem, calc(100% - 2rem)); }
+  body:has(main.fit) .masthead { padding-top: .5rem; }
+  body:has(main.fit) .masthead-strip { padding-bottom: .4rem; }
+  body:has(main.fit) .masthead nav { padding-block: .55rem; }
+  body:has(main.fit) .masthead nav a { padding: .3rem 1rem; }
+  body:has(main.fit) footer { margin-top: 0; }
+  body:has(main.fit) .footer-inner { padding-block: .5rem; }
+
+  main.fit { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-bottom: .7rem; }
+  main.fit .page-heading { padding-block: .6rem 0; }
+  main.fit .page-heading h1 { margin-block: 0 .2rem; font-size: 2.2rem; }
+  main.fit #doors {
+    display: grid; flex: 1; min-height: 0; margin-top: .8rem; column-gap: 1.4rem;
+    grid-template: "head head" auto "progress side" auto "doors side" minmax(0, 1fr) / minmax(0, 1fr) 21rem;
+  }
+  main.fit .section-heading { grid-area: head; margin-bottom: .7rem; }
+  main.fit .door-progress { grid-area: progress; margin-bottom: .6rem; }
+  /* The notice floats over the foot of the sheet, so showing it does not resize the doors. */
+  main.fit .locked-notice:not(:empty) { position: absolute; z-index: 3; left: 0; bottom: 0; margin: 0; box-shadow: 3px 3px 0 var(--shadow); }
+
+  main.fit .console { grid-area: side; display: flex; flex-direction: column; gap: .9rem; min-height: 0; margin: 0; }
+  main.fit .board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+  main.fit .board .tile:nth-child(2) { grid-column: 1 / -1; }
+  main.fit .tile { padding: .6rem .8rem .7rem; box-shadow: 4px 4px 0 var(--shadow); }
+  main.fit .tile-value { font-size: 1.5rem; }
+  main.fit .tile-value.mono { font-size: 1.25rem; }
+  main.fit .desk-log { flex: 1; min-height: 0; overflow: hidden; }
+
+  main.fit .doors {
+    grid-area: doors; grid-template-rows: repeat(5, minmax(0, 1fr)); grid-auto-rows: auto;
+    gap: .9rem 1rem; min-height: 0; max-height: 66rem; padding: 0 .9rem .9rem 0;
+  }
+  main.fit .doors li { min-width: 0; min-height: 0; container-type: size; }
+  main.fit .stamp-frame { gap: 0; padding: clamp(.15rem, 4cqh, .55rem) clamp(.35rem, 5cqw, .65rem); }
+  main.fit .stamp-number, main.fit .doors li:nth-child(24) .stamp-number { font-size: clamp(1.3rem, 38cqh, 3.5rem); }
+  main.fit .doors li:nth-child(24) .stamp-number { font-size: clamp(2.4rem, 38cqh, 6.5rem); }
+  main.fit .stamp-label { font-size: clamp(.72rem, 11cqh, .95rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main.fit .postmark { width: clamp(3.4rem, 52cqh, 6.2rem); }
+  @container (max-height: 7.5rem) {
+    main.fit .stamp { padding: 9px; }
+    main.fit .stamp-micro { display: none; }
+  }
+  /* Very short doors: numeral and label side by side. */
+  @container (max-height: 5.4rem) {
+    main.fit .stamp-frame { flex-direction: row; align-items: center; gap: .5rem; }
+    main.fit .stamp-label { white-space: normal; }
+  }
 }
-@media (min-width: 901px) and (min-height: 1440px) {
-  :root:has(main[data-view="calendar"]) { font-size: min(100%, calc(100dvh / var(--fit-rem))); }
+/* Shorter windows give the masthead less room, so the doors keep theirs. */
+@media (min-width: 1100px) and (min-height: 680px) and (max-height: 1150px) {
+  body:has(main.fit) .masthead-title { padding-block: .5rem; }
+  body:has(main.fit) .masthead:not(.compact) .site-title { font-size: 2.8rem; }
+  body:has(main.fit) .masthead-copy { gap: .3rem; }
+  body:has(main.fit) .masthead-copy .lede { font-size: 1.05rem; }
+  body:has(main.fit) .masthead-stamp { zoom: .6; }
 }
-@media (min-width: 901px) and (min-height: 1380px) {
-  main:is([data-view="home"], [data-view="calendar"]) { min-height: 0; padding-bottom: 1.5rem; }
-  main:is([data-view="home"], [data-view="calendar"]) ~ footer { margin-top: 1rem; }
-  main:is([data-view="home"], [data-view="calendar"]) .console { margin-bottom: 1.4rem; }
-  main[data-view="calendar"] .page-heading { padding-top: 1.5rem; }
+@media (min-width: 1100px) and (min-height: 680px) and (max-height: 860px) {
+  body:has(main.fit) .masthead-stamp, body:has(main.fit) .masthead-copy .lede { display: none; }
+  body:has(main.fit) .masthead:not(.compact) .site-title { font-size: 2.2rem; }
+  /* The calendar page keeps its heading for screen readers and gives the space to the doors. */
+  main.fit .page-heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  main.fit .section-heading { margin-bottom: .4rem; }
+  main.fit:has(.section-heading) .desk-log { display: none; }
 }
 
 @media (max-width: 900px) {

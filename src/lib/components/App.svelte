@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
+  import { invalidateAll } from '$app/navigation';
   import CommunityTips from './CommunityTips.svelte';
   import DeskLog from './DeskLog.svelte';
   import DoorOverlay from './DoorOverlay.svelte';
@@ -8,32 +9,25 @@
   import ThemeToggle from './ThemeToggle.svelte';
   import TimeMachine from './TimeMachine.svelte';
   import { sourceGroups } from '#lib/content/sources.ts';
-  import { demoEdition, demoFeed } from '#lib/content/demo.ts';
   import { days, doorDate, doorOpensAt } from '#lib/domain/edition.ts';
-  import {
-    categories, feedFilters, pageSize, severity, severityLabels,
-    type Edition, type FeedPage, type PublicIncident
-  } from '#lib/domain/incidents.ts';
+  import { categories, feedFilters, severity, severityLabels, type PublicIncident } from '#lib/domain/incidents.ts';
+  import { publicView, type PublicData } from '#lib/domain/pages.ts';
   import { zonedDay } from '#lib/util/time.ts';
 
-  let { href }: { href: string } = $props();
+  // `data` is loaded on the server (src/lib/server/api/pages.ts), so the page renders complete.
+  let { href, data }: { href: string; data: PublicData } = $props();
   const url = new URL(untrack(() => href));
-  const demo = url.searchParams.get('demo') === '1' || (import.meta.env.DEV && !url.searchParams.has('demo'));
-  const path = url.pathname.replace(/\/$/, '') || '/';
-  const detail = /^\/incidents\/([1-9]\d*)$/.exec(path);
-  const view = path === '/' ? 'home' : path === '/calendar' ? 'calendar' : path === '/incidents' ? 'feed' : path === '/submit' ? 'submit' : path === '/sources' ? 'sources' : detail ? 'detail' : 'missing';
+  const demo = untrack(() => data.demo);
+  const { view } = publicView(url.pathname);
   const filters = feedFilters(url.searchParams);
-  const defaultYear = 2026;
-  const requestedYear = view === 'calendar' ? url.searchParams.get('year') : null;
   const brand = 'CyberXmas';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // Dates are calendar days (YYYY-MM-DD) or UTC instants; format both in UTC so a day never shifts.
   const dateFormat = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' });
-  let edition = $state<Edition | null>(null);
-  let feed = $state<FeedPage<PublicIncident> | null>(null);
-  let incident = $state<PublicIncident | null>(null);
-  let loading = $state(['home', 'calendar', 'feed', 'detail'].includes(view));
-  let error = $state('');
+  let edition = $derived(data.edition);
+  let feed = $derived(data.feed);
+  let incident = $derived(data.incident);
+  let error = $derived(data.error);
   let opened = $state<PublicIncident | null>(null);
   let revealDay = $state<number | null>(null);
   let revealDenied = $state(false);
@@ -133,68 +127,15 @@
     if (run !== null && run === revealRun) lockedNotice = `Access denied. This door unlocks ${formatDate(date)} at midnight ${timezone}.`;
   }
 
-  async function get<T>(pathname: string, signal: AbortSignal): Promise<T> {
-    const response = await fetch(pathname, { signal });
-    if (!response.ok) {
-      const result = await response.json().catch(() => ({}));
-      throw new Error(result.error ?? result.message ?? 'Could not load the latest stories.');
-    }
-    return response.json();
-  }
-
   onMount(() => {
-    const controller = new AbortController();
-    async function load() {
-      // Other pages still need the edition's date for the masthead strip and the preview banner.
-      if (view !== 'home' && view !== 'calendar') {
-        if (demo) edition = demoEdition(defaultYear);
-        else get<Edition>('/api/edition', controller.signal).then((value) => { edition = value; }, () => {});
-      }
-      try {
-        if (view === 'home' || view === 'calendar') {
-          if (demo) {
-            const year = Number(requestedYear ?? defaultYear);
-            if (![2026, 2025].includes(year)) throw new Error('Edition not found');
-            edition = demoEdition(year);
-          } else {
-            const query = requestedYear === null ? '' : `?${new URLSearchParams({ year: requestedYear })}`;
-            edition = await get<Edition>(`/api/edition${query}`, controller.signal);
-          }
-        } else if (view === 'feed') {
-          const query = new URLSearchParams({ q: filters.query, category: filters.category, page: String(filters.page) });
-          if (demo) {
-            const matches = demoFeed.filter((item) => (!filters.category || item.category === filters.category)
-              && `${item.title} ${item.summary}`.toLowerCase().includes(filters.query.toLowerCase()));
-            feed = {
-              items: matches.slice((filters.page - 1) * pageSize, filters.page * pageSize),
-              page: filters.page,
-              hasMore: filters.page * pageSize < matches.length
-            };
-          } else {
-            feed = await get<FeedPage<PublicIncident>>(`/api/incidents?${query}`, controller.signal);
-          }
-        } else if (view === 'detail' && detail) {
-          if (demo) {
-            incident = demoFeed.find((item) => item.id === Number(detail[1])) ?? null;
-            if (!incident) throw new Error('Incident not found');
-          } else {
-            incident = await get<PublicIncident>(`/api/incidents/${detail[1]}`, controller.signal);
-          }
-        }
-      } catch (failure) {
-        if (!controller.signal.aborted) error = (failure as Error).message;
-      } finally {
-        if (!controller.signal.aborted) loading = false;
-      }
-    }
-    load();
-    // Reload when the edition's day rolls over so a newly opened door appears.
-    const timer = demo ? undefined : setInterval(() => {
+    if (demo) return;
+    // Reload the data when the edition's day rolls over so a newly opened door appears.
+    const timer = setInterval(() => {
       const previous = zonedDay(new Date(clock), timezone);
       realNow = Date.now();
-      if (edition && previous !== zonedDay(new Date(clock), timezone)) load();
+      if (edition && previous !== zonedDay(new Date(clock), timezone)) invalidateAll();
     }, 15000);
-    return () => { controller.abort(); clearInterval(timer); };
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -348,12 +289,12 @@
   <div class="preview"><div class="wrap"><strong>Preview site</strong> <span>Real collected incidents, but the calendar runs {shiftDays} {shiftDays === 1 ? 'day' : 'days'} ahead, so today is {formatDate(today)}. Nothing here is the published edition.</span></div></div>
 {/if}
 
-<main id="content" class="wrap" data-view={view}>
+<main id="content" class="wrap" class:fit={view === 'home' || view === 'calendar'}>
   {#if view === 'calendar'}
     <div class="page-heading"><p class="eyebrow">The Christmas countdown</p><h1>Calendar &amp; archive</h1></div>
   {:else if view === 'submit'}
     <div class="page-heading"><p class="eyebrow">From the community</p><h1>Send an incident tip</h1><p>Spotted something worth putting behind a door? Share a published CVE or a direct link from a trusted source, or <a href="#review">browse the review queue</a>.</p></div>
-    <CommunityTips />
+    <CommunityTips initial={data.tips} />
   {:else if view === 'sources'}
     <div class="page-heading"><p class="eyebrow">Follow the paper trail</p><h1>Sources and reading</h1><p>Newsrooms, vulnerability databases, vendor blogs, and status pages to check before you send a tip.</p></div>
     {#each sourceGroups as group (group.name)}
@@ -380,7 +321,6 @@
     </form>
   {/if}
 
-  {#if loading}<p class="notice" role="status">Loading reports&hellip;</p>{/if}
   {#if error}<p class="notice" role="alert">{error}. <a href={link('/')}>Back to home</a></p>{/if}
   {#if view === 'missing'}<section class="page-heading"><p class="eyebrow">Return to sender</p><h1>Page not found</h1><a href={link('/')}>Back to home</a></section>{/if}
 
