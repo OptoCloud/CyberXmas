@@ -348,7 +348,7 @@
   <div class="preview"><div class="wrap"><strong>Preview site</strong> <span>Real collected incidents, but the calendar runs {shiftDays} {shiftDays === 1 ? 'day' : 'days'} ahead, so today is {formatDate(today)}. Nothing here is the published edition.</span></div></div>
 {/if}
 
-<main id="content" class="wrap">
+<main id="content" class="wrap" data-view={view}>
   {#if view === 'calendar'}
     <div class="page-heading"><p class="eyebrow">The Christmas countdown</p><h1>Calendar &amp; archive</h1></div>
   {:else if view === 'submit'}

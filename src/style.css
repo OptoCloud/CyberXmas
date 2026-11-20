@@ -83,7 +83,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; text-wrap: balance; 
 h1 { font-size: clamp(2.5rem, 6.4vw, 5rem); line-height: 1; letter-spacing: -.01em; }
 h2 { font-size: clamp(1.75rem, 3.6vw, 2.6rem); line-height: 1.08; }
 h3 { font-size: clamp(1.3rem, 2.2vw, 1.65rem); line-height: 1.12; }
-.wrap { width: min(1140px, calc(100% - 2rem)); margin-inline: auto; }
+.wrap { width: min(71.25rem, calc(100% - 2rem)); margin-inline: auto; }
 .sr-only, .skip:not(:focus) {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
@@ -121,7 +121,7 @@ h3 { font-size: clamp(1.3rem, 2.2vw, 1.65rem); line-height: 1.12; }
 .masthead-stamp .stamp-frame { justify-content: center; gap: .35rem; text-align: center; --frame: var(--pine); }
 .masthead-stamp svg { width: 72%; margin-inline: auto; }
 .masthead-stamp .stamp-number { font-size: 2.2rem; }
-.masthead-stamp .seal { right: -1.2rem; bottom: -.8rem; font-size: 8px; }
+.masthead-stamp .seal { right: -1.2rem; bottom: -.8rem; font-size: .5rem; }
 .masthead-stamp .seal .seal-chip { width: 10.5em; }
 .masthead-stamp .seal .chip-label { font-size: 1.25em; }
 
@@ -400,6 +400,27 @@ footer strong { color: var(--fg); font: 1.25rem var(--display); }
 @keyframes postmark-in { from { opacity: 0; transform: rotate(-11deg) scale(1.15); } to { opacity: .72; transform: rotate(-11deg); } }
 @keyframes hold { 0%, 100% { transform: none; } 30% { transform: translateX(-.4rem) rotate(-2deg); } 65% { transform: translateX(.35rem) rotate(1.5deg); } }
 
+/*
+ * The home and calendar pages are posters: on a tall desktop window the whole sheet scales with the
+ * window height so it fits without scrolling. Sizes are in rem, so scaling the root font size acts
+ * like browser zoom. --fit-rem is the page's height in rem; below 12px per rem (75%) the text gets
+ * too small, so shorter windows keep the full size and scroll.
+ */
+:root:has(main[data-view="home"]) { --fit-rem: 115; }
+:root:has(main[data-view="calendar"]) { --fit-rem: 120; }
+@media (min-width: 901px) and (min-height: 1380px) {
+  :root:has(main[data-view="home"]) { font-size: min(100%, calc(100dvh / var(--fit-rem))); }
+}
+@media (min-width: 901px) and (min-height: 1440px) {
+  :root:has(main[data-view="calendar"]) { font-size: min(100%, calc(100dvh / var(--fit-rem))); }
+}
+@media (min-width: 901px) and (min-height: 1380px) {
+  main:is([data-view="home"], [data-view="calendar"]) { min-height: 0; padding-bottom: 1.5rem; }
+  main:is([data-view="home"], [data-view="calendar"]) ~ footer { margin-top: 1rem; }
+  main:is([data-view="home"], [data-view="calendar"]) .console { margin-bottom: 1.4rem; }
+  main[data-view="calendar"] .page-heading { padding-top: 1.5rem; }
+}
+
 @media (max-width: 900px) {
   .doors { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(9.5rem, auto); }
   .doors li:nth-child(n) { grid-column: auto; grid-row: auto; }
@@ -481,7 +502,7 @@ footer strong { color: var(--fg); font: 1.25rem var(--display); }
 .theme-toggle button[aria-checked="true"] { color: var(--red-ink); background: var(--toggle-on); }
 
 /* ---------- Seals: holographic sticker (print) or smartcard chip (crt) ---------- */
-.seal { position: absolute; z-index: 2; right: -.9rem; bottom: -.9rem; font-size: 9px; pointer-events: none; transform: rotate(-6deg); }
+.seal { position: absolute; z-index: 2; right: -.9rem; bottom: -.9rem; font-size: .5625rem; pointer-events: none; transform: rotate(-6deg); }
 .seal-print, .seal-crt { display: grid; place-items: center; }
 .seal-print > * { grid-area: 1 / 1; }
 .seal-crt { gap: .3em; }
